@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 app = FastAPI()
 
+#validation error handler
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     for error in exc.errors():
