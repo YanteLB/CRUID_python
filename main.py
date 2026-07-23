@@ -9,11 +9,16 @@ app = FastAPI()
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     for error in exc.errors():
+        field = error["loc"][-1]
         if error["type"] == "missing":
-            field = error["loc"][-1]
             return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 content={"error": f"Field '{field}' is required."},
+            )
+        if error["type"] == "extra_forbidden":
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error": f"Unknown field '{field}'. Check for typos."},
             )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -51,6 +56,12 @@ def get_task(task_id: int):
 class Task(BaseModel):
     title: str
 
+class TaskUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+    title: str | None = None
+    completed: bool | None = None
+    description: str | None = None
+
 
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -62,9 +73,33 @@ def create_task(task: Task):
     new_task = {"id": task_id, "title": title+f"{task_id}", "description": f"This is task {task_id}", "completed": False}
     tasks.append(new_task)
     return new_task
-#def main():
- #   print("Hello from cruid-python!")
+
+@app.patch("/tasks/{task_id}", status_code=status.HTTP_200_OK)
+def patch_task(task_id: int, task: TaskUpdate):
+    if not task or (task.title is None and task.completed is None and task.description is None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields provided for update")
+    existing_task = next((t for t in tasks if t["id"] == task_id), None)
+    if existing_task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": f"Task {task_id} not found"})
+    if task.title is not None:
+        if task.title.strip() == "":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title cannot be empty") 
+        existing_task["title"] = task.title
+    if task.completed is not None:
+        if not isinstance(task.completed, bool):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed must be a boolean value")
+        existing_task["completed"] = task.completed
+    if task.description is not None:
+        if task.description.strip() == "":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Description cannot be empty")
+        existing_task["description"] = task.description
+    return existing_task
 
 
-#if __name__ == "__main__":
-#    main()
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id: int):
+    existing_task = next((t for t in tasks if t["id"] == task_id), None)
+    if existing_task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": f"Task {task_id} not found"})
+    tasks.remove(existing_task)
+
